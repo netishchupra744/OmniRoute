@@ -1,0 +1,132 @@
+name: Bootstrap and Build Bijoy AI Video Maker
+
+on:
+  push:
+    branches:
+      - bijoy-ai-video-maker
+  pull_request:
+    branches:
+      - bijoy-v3.8.49-base
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CI: "true"
+  NODE_OPTIONS: "--max_old_space_size=8192"
+  NPM_CONFIG_REGISTRY: "https://registry.npmjs.org/"
+  NPM_CONFIG_AUDIT: "false"
+  NPM_CONFIG_FUND: "false"
+  CSC_IDENTITY_AUTO_DISCOVERY: "false"
+  JWT_SECRET: "ci-build-secret-with-sufficient-length-for-validation"
+  API_KEY_SECRET: "ci-build-api-key-secret-with-sufficient-length"
+  DISABLE_SQLITE_AUTO_BACKUP: "true"
+
+jobs:
+  build-windows:
+    name: Apply source and build Windows release
+    runs-on: windows-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout target Bijoy branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Download complete Bijoy source overlay
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $url = "https://drive.usercontent.google.com/download?id=1pIfZqFqceD3dOoJQON5r9ZhLaTFmMjCV&export=download&confirm=t"
+          $archive = Join-Path $env:RUNNER_TEMP "bijoy-complete-overlay.tar.xz"
+          & curl.exe -fL --retry 5 --retry-delay 5 --connect-timeout 30 $url -o $archive
+          if ($LASTEXITCODE -ne 0) { throw "Drive overlay download failed with exit code $LASTEXITCODE" }
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          $expected = "cd3d2645b7d5084a15bda529d3566556a4b508d89b2a8ac3259e7b187c42a188"
+          if ($actual -ne $expected) { throw "Overlay checksum mismatch. Expected $expected but received $actual" }
+          Write-Host "Overlay checksum verified: $actual"
+          tar.exe -xJf $archive -C $env:GITHUB_WORKSPACE
+          if ($LASTEXITCODE -ne 0) { throw "Overlay extraction failed with exit code $LASTEXITCODE" }
+          $required = @(
+            "package.json",
+            "electron/package.json",
+            "electron/assets/icon.ico",
+            "scripts/test/run-bijoy-tests.mjs",
+            "src/lib/db/migrations/134_bijoy_video_maker.sql",
+            "tests/integration/videoMakerPersistence.test.ts"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path (Join-Path $env:GITHUB_WORKSPACE $path))) { throw "Missing required overlay file: $path" }
+          }
+
+      - name: Commit real Bijoy source to branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Bijoy source already committed."
+          else
+            git commit -m "Implement Bijoy AI Video Maker"
+            git push origin HEAD:bijoy-ai-video-maker
+          fi
+
+      - name: Set up supported Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            electron/package-lock.json
+
+      - name: Install application dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if npm ci --no-audit --no-fund; then exit 0; fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            sleep $((attempt * 20))
+          done
+
+      - name: Run Bijoy unit and persistence tests
+        run: npm run test:bijoy
+
+      - name: Verify database migration numbering
+        run: npm run check:migration-numbering
+
+      - name: Build Next.js standalone application
+        run: npm run build
+
+      - name: Install Electron build dependencies
+        working-directory: electron
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if npm ci --no-audit --no-fund; then exit 0; fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            sleep $((attempt * 20))
+          done
+
+      - name: Build NSIS installer and portable application
+        working-directory: electron
+        run: npm run build:win
+
+      - name: Verify Windows executables and checksums
+        run: npm run verify:bijoy:windows
+
+      - name: Upload Windows release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bijoy-AI-Video-Maker-Windows
+          path: release-assets/windows/
+          if-no-files-found: error
+          retention-days: 30
