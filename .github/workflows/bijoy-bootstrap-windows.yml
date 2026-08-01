@@ -121,6 +121,36 @@ jobs:
         working-directory: electron
         run: npm run build:win
 
+      - name: Runtime smoke test packaged renderer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:APPDATA = Join-Path $env:RUNNER_TEMP "bijoy-smoke-appdata"
+          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP "bijoy-smoke-localappdata"
+          New-Item -ItemType Directory -Force -Path $env:APPDATA, $env:LOCALAPPDATA | Out-Null
+          $exe = Join-Path $env:GITHUB_WORKSPACE "electron\dist-electron\win-unpacked\Bijoy AI Video Maker.exe"
+          if (-not (Test-Path $exe)) { throw "Packaged executable not found: $exe" }
+          $process = Start-Process -FilePath $exe -ArgumentList "--remote-debugging-port=9222", "--disable-gpu" -PassThru
+          try {
+            node scripts/test/electron-runtime-smoke.mjs
+            if ($LASTEXITCODE -ne 0) { throw "Packaged renderer smoke test failed with exit code $LASTEXITCODE" }
+          } finally {
+            if ($process -and -not $process.HasExited) {
+              & taskkill.exe /PID $process.Id /T /F | Out-Host
+            }
+          }
+
+      - name: Upload runtime diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bijoy-AI-Video-Maker-Runtime-Diagnostics
+          path: |
+            electron-runtime-diagnostics.json
+            electron-runtime-smoke.png
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Verify Windows executables and checksums
         run: npm run verify:bijoy:windows
 
