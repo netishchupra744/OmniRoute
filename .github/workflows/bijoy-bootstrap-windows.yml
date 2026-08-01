@@ -124,10 +124,25 @@ jobs:
       - name: Verify Windows executables and checksums
         run: npm run verify:bijoy:windows
 
-      - name: Upload Windows release artifact
+      - name: Upload Windows Setup artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Bijoy-AI-Video-Maker-Windows
-          path: release-assets/windows/
+          name: Bijoy-AI-Video-Maker-Setup
+          path: |
+            release-assets/windows/Bijoy-AI-Video-Maker-Setup.exe
+            release-assets/windows/SHA256SUMS.txt
+            release-assets/windows/BUILD_MANIFEST.json
+            release-assets/windows/latest.yml
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Windows Portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bijoy-AI-Video-Maker-Portable
+          path: |
+            release-assets/windows/Bijoy-AI-Video-Maker-Portable.exe
+            release-assets/windows/SHA256SUMS.txt
+            release-assets/windows/BUILD_MANIFEST.json
           if-no-files-found: error
           retention-days: 30
