@@ -1,5 +1,5 @@
 /**
- * OmniRoute Electron Desktop App - Preload Script
+ * Bijoy AI Video Maker - Secure Preload Script
  *
  * Secure bridge between renderer (Next.js) and main process (Electron).
  * Uses contextIsolation: true for maximum security.
@@ -96,6 +96,9 @@ const VALID_CHANNELS = {
     "open-external",
     "get-data-dir",
     "restart-server",
+    "retry-startup",
+    "open-logs",
+    "reset-startup-settings",
     "check-for-updates",
     "download-update",
     "install-update",
@@ -141,6 +144,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   openExternal: (url) => safeInvoke("open-external", url),
   getDataDir: () => safeInvoke("get-data-dir"),
   restartServer: () => safeInvoke("restart-server"),
+  retryStartup: () => safeInvoke("retry-startup"),
+  openLogs: () => safeInvoke("open-logs"),
+  resetStartupSettings: () => safeInvoke("reset-startup-settings"),
   getAppVersion: () => safeInvoke("get-app-version"),
 
   // ── Auto-Update ──────────────────────────────────────────

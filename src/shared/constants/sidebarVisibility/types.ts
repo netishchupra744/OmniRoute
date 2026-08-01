@@ -1,6 +1,10 @@
 export const HIDEABLE_SIDEBAR_ITEM_IDS = [
-  // Home
+  // Bijoy AI Video Maker
   "home",
+  "new-video",
+  "my-projects",
+  "avatar-profiles",
+  "usage",
   // OmniProxy — flat
   "api-manager",
   "endpoints",
@@ -114,6 +118,7 @@ export type AlwaysVisibleSidebarItemId = "proxy";
 export type SidebarItemId = HideableSidebarItemId | AlwaysVisibleSidebarItemId;
 
 export type SidebarSectionId =
+  | "video-maker"
   | "home"
   | "omni-proxy"
   | "analytics"

@@ -1,14 +1,13 @@
 {
-  "name": "omniroute-desktop",
+  "name": "bijoy-ai-video-maker-desktop",
   "version": "3.8.49",
-  "description": "OmniRoute Desktop Application",
+  "description": "Bijoy AI Video Maker Windows Desktop Application",
   "main": "main.js",
   "author": {
-    "name": "OmniRoute Team",
-    "email": "support@omniroute.online"
+    "name": "Bijoy AI Video Maker"
   },
   "license": "MIT",
-  "homepage": "https://omniroute.online",
+  "homepage": "https://github.com/diegosouzapw/OmniRoute",
   "engines": {
     "node": ">=22.22.2 <23 || >=24.0.0 <27"
   },
@@ -40,18 +39,13 @@
     "undici": "^7.28.0"
   },
   "build": {
-    "appId": "online.omniroute.desktop",
-    "productName": "OmniRoute",
-    "copyright": "Copyright © 2025 OmniRoute",
+    "appId": "com.bijoy.aivideomaker",
+    "productName": "Bijoy AI Video Maker",
+    "copyright": "Copyright \u00a9 2026 Bijoy AI Video Maker",
     "buildDependenciesFromSource": true,
     "directories": {
       "output": "dist-electron",
       "buildResources": "assets"
-    },
-    "publish": {
-      "provider": "github",
-      "owner": "diegosouzapw",
-      "repo": "OmniRoute"
     },
     "files": [
       "main.js",
@@ -104,7 +98,8 @@
           ]
         }
       ],
-      "icon": "assets/icon.ico"
+      "icon": "assets/icon.ico",
+      "executableName": "Bijoy AI Video Maker"
     },
     "mac": {
       "target": [
@@ -139,7 +134,10 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "installerIcon": "assets/icon.ico",
-      "uninstallerIcon": "assets/icon.ico"
+      "uninstallerIcon": "assets/icon.ico",
+      "artifactName": "Bijoy-AI-Video-Maker-Setup.exe",
+      "shortcutName": "Bijoy AI Video Maker",
+      "uninstallDisplayName": "Bijoy AI Video Maker"
     },
     "dmg": {
       "contents": [
@@ -154,6 +152,10 @@
           "path": "/Applications"
         }
       ]
+    },
+    "artifactName": "Bijoy-AI-Video-Maker-${version}-${arch}.${ext}",
+    "portable": {
+      "artifactName": "Bijoy-AI-Video-Maker-Portable.exe"
     }
   }
 }

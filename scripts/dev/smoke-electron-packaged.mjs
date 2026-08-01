@@ -14,7 +14,13 @@ const ROOT = join(__dirname, "..", "..");
 const DEFAULT_TIMEOUT_MS = 45_000;
 const DEFAULT_SETTLE_MS = 2_000;
 const DEFAULT_URL = "http://127.0.0.1:20128/login";
-export const LINUX_EXECUTABLE_NAMES = ["omniroute-desktop", "omniroute", "OmniRoute"];
+export const LINUX_EXECUTABLE_NAMES = [
+  "bijoy-ai-video-maker",
+  "Bijoy AI Video Maker",
+  "omniroute-desktop",
+  "omniroute",
+  "OmniRoute",
+];
 export const FATAL_LOG_PATTERNS = [
   /Cannot find module/i,
   /MODULE_NOT_FOUND/,
@@ -85,14 +91,15 @@ function findExecutableByName(rootDir, names) {
 function discoverWindowsExecutable() {
   const distDir = join(ROOT, "electron", "dist-electron");
   const candidates = [
+    join(distDir, "win-unpacked", "Bijoy AI Video Maker.exe"),
+    join(distDir, "win-x64-unpacked", "Bijoy AI Video Maker.exe"),
+    join(distDir, "win-arm64-unpacked", "Bijoy AI Video Maker.exe"),
     join(distDir, "win-unpacked", "OmniRoute.exe"),
-    join(distDir, "win-x64-unpacked", "OmniRoute.exe"),
-    join(distDir, "win-arm64-unpacked", "OmniRoute.exe"),
   ];
 
   return (
     candidates.find((candidate) => existsSync(candidate)) ||
-    findExecutableByName(distDir, ["OmniRoute.exe"]) ||
+    findExecutableByName(distDir, ["Bijoy AI Video Maker.exe", "OmniRoute.exe"]) ||
     candidates[0]
   );
 }
@@ -371,7 +378,13 @@ async function ensureSmokeEnvDirs(smokeEnv, dataDir) {
   // requestSingleInstanceLock() runs synchronously at module load and
   // fails silently if the directory doesn't exist yet — causing exit(0).
   if (platform() === "win32" && smokeEnv.APPDATA) {
-    for (const subdir of ["omniroute-desktop", "OmniRoute", "omniroute"]) {
+    for (const subdir of [
+      "Bijoy AI Video Maker",
+      "bijoy-ai-video-maker",
+      "omniroute-desktop",
+      "OmniRoute",
+      "omniroute",
+    ]) {
       dirs.push(join(smokeEnv.APPDATA, subdir));
     }
   }
@@ -400,7 +413,7 @@ async function main() {
   const appExecutable = discoverPackagedExecutable();
   if (!existsSync(appExecutable)) {
     throw new Error(
-      `Packaged OmniRoute executable not found at ${appExecutable}. Build it first with \`npm run build:<target> --prefix electron\` or set ELECTRON_SMOKE_APP_EXECUTABLE.`
+      `Packaged Bijoy AI Video Maker executable not found at ${appExecutable}. Build it first with \`npm run build:<target> --prefix electron\` or set ELECTRON_SMOKE_APP_EXECUTABLE.`
     );
   }
 
