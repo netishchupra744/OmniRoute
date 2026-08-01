@@ -1,0 +1,105 @@
+name: Build Bijoy AI Video Maker Windows Installer
+
+on:
+  push:
+    branches:
+      - bijoy-ai-video-maker
+  pull_request:
+    branches:
+      - bijoy-v3.8.49-base
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: Build Windows Setup and Portable
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      CI: "true"
+      npm_config_registry: https://registry.npmjs.org/
+
+    steps:
+      - name: Checkout v3.8.49 branch
+        uses: actions/checkout@v4
+
+      - name: Reconstruct and verify Bijoy source overlay
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $parts = Get-ChildItem -LiteralPath ".bijoy/release" -Filter "part*.txt" | Sort-Object Name
+          if ($parts.Count -ne 26) {
+            throw "Expected 26 payload parts, found $($parts.Count)."
+          }
+
+          $base64 = ($parts | ForEach-Object { (Get-Content -LiteralPath $_.FullName -Raw).Trim() }) -join ""
+          $archive = Join-Path $env:RUNNER_TEMP "bijoy-release-overlay.tar.xz"
+          [System.IO.File]::WriteAllBytes($archive, [System.Convert]::FromBase64String($base64))
+
+          $actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          $expectedHash = "a0b349162bb08c9bde8916c9de6f01dbf5d75428576d5822d180f64fcfcf60a0"
+          if ($actualHash -ne $expectedHash) {
+            throw "Payload checksum mismatch. Expected $expectedHash but got $actualHash."
+          }
+
+          tar.exe -xf $archive -C .
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to extract the verified Bijoy source overlay."
+          }
+
+          if (-not (Test-Path -LiteralPath "scripts/release/verify-bijoy-windows-artifacts.mjs")) {
+            throw "The Bijoy release verifier was not restored from the overlay."
+          }
+
+          Write-Host "Bijoy source overlay verified and restored: $actualHash"
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            electron/package-lock.json
+
+      - name: Install root dependencies
+        shell: pwsh
+        run: |
+          npm config set registry https://registry.npmjs.org/
+          npm ci
+
+      - name: Run Bijoy validation tests
+        shell: pwsh
+        run: |
+          npm run test:bijoy
+          npm run check:bijoy:migration
+
+      - name: Build production web application
+        shell: pwsh
+        run: npm run build
+
+      - name: Install Electron dependencies
+        shell: pwsh
+        working-directory: electron
+        run: |
+          npm config set registry https://registry.npmjs.org/
+          npm ci
+
+      - name: Build Windows installer and portable application
+        shell: pwsh
+        working-directory: electron
+        run: npm run build:win
+
+      - name: Verify Windows release artifacts
+        shell: pwsh
+        run: npm run verify:bijoy:windows
+
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bijoy-AI-Video-Maker-Windows
+          path: release-assets/windows/**
+          if-no-files-found: error
+          retention-days: 30
