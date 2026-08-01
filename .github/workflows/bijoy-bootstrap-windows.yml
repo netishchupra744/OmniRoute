@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - bijoy-ai-video-maker
+  pull_request:
+    branches:
+      - bijoy-v3.8.49-base
   workflow_dispatch:
 
 permissions:
@@ -27,9 +30,10 @@ jobs:
     timeout-minutes: 180
 
     steps:
-      - name: Checkout OmniRoute v3.8.49 branch
+      - name: Checkout target Bijoy branch
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
           fetch-depth: 0
           persist-credentials: true
 
