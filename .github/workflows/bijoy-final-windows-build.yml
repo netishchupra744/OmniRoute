@@ -1,0 +1,127 @@
+name: Bijoy Final Windows Build
+
+on:
+  push:
+    branches:
+      - bijoy-build-final
+  workflow_dispatch:
+
+concurrency:
+  group: bijoy-final-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 150
+    env:
+      CI: "true"
+      npm_config_registry: https://registry.npmjs.org/
+
+    steps:
+      - name: Checkout exact v3.8.49 based branch
+        uses: actions/checkout@v4
+
+      - name: Reconstruct and verify Bijoy source overlay
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $parts = Get-ChildItem -LiteralPath ".bijoy/release" -Filter "part*.txt" | Sort-Object Name
+          if ($parts.Count -ne 26) { throw "Expected 26 payload parts, found $($parts.Count)." }
+          $base64 = ($parts | ForEach-Object { (Get-Content -LiteralPath $_.FullName -Raw).Trim() }) -join ""
+          $archive = Join-Path $env:RUNNER_TEMP "bijoy-release-overlay.tar.xz"
+          [IO.File]::WriteAllBytes($archive, [Convert]::FromBase64String($base64))
+          $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          $expected = "a0b349162bb08c9bde8916c9de6f01dbf5d75428576d5822d180f64fcfcf60a0"
+          if ($actual -ne $expected) { throw "Payload checksum mismatch. Expected $expected, got $actual." }
+          tar.exe -xf $archive -C .
+          if ($LASTEXITCODE -ne 0) { throw "Verified payload extraction failed." }
+          if (-not (Test-Path -LiteralPath "scripts/release/verify-bijoy-windows-artifacts.mjs")) {
+            throw "Bijoy release verifier missing after overlay restore."
+          }
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            electron/package-lock.json
+
+      - name: Install, validate, build and package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $log = Join-Path $PWD "bijoy-final-build.log"
+          function Invoke-Logged([string]$Title, [string]$Command, [string]$Directory = ".") {
+            "`n===== $Title =====" | Tee-Object -FilePath $log -Append
+            Push-Location $Directory
+            try {
+              cmd.exe /d /s /c $Command 2>&1 | Tee-Object -FilePath $log -Append
+              if ($LASTEXITCODE -ne 0) { throw "$Title failed with exit code $LASTEXITCODE" }
+            } finally { Pop-Location }
+          }
+          npm config set registry https://registry.npmjs.org/
+          Invoke-Logged "Install root dependencies" "npm ci"
+          Invoke-Logged "Run Bijoy tests" "npm run test:bijoy"
+          Invoke-Logged "Validate migration" "npm run check:bijoy:migration"
+          Invoke-Logged "Build production web app" "npm run build"
+          Invoke-Logged "Install Electron dependencies" "npm ci" "electron"
+          Invoke-Logged "Build Setup and Portable" "npm run build:win" "electron"
+          Invoke-Logged "Verify Windows artifacts" "npm run verify:bijoy:windows"
+
+      - name: Upload final build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bijoy-Final-Build-Log-${{ github.run_number }}
+          path: bijoy-final-build.log
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload Windows EXE artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bijoy-AI-Video-Maker-Windows
+          path: release-assets/windows/**
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create downloadable GitHub pre-release
+        if: success()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "bijoy-final-${{ github.run_number }}"
+          $assets = Get-ChildItem -LiteralPath "release-assets/windows" -File | ForEach-Object { $_.FullName }
+          if ($assets.Count -lt 2) { throw "Setup and Portable EXE were not both produced." }
+          gh release create $tag @assets --title "Bijoy AI Video Maker Windows Build ${{ github.run_number }}" --notes "Automated verified development build based on OmniRoute v3.8.49." --prerelease
+
+      - name: Publish failure details
+        if: failure()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $report = @()
+          $report += "Automated final Windows build failed."
+          $report += ""
+          $report += "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          $report += "Commit: ${{ github.sha }}"
+          if (Test-Path -LiteralPath "bijoy-final-build.log") {
+            $report += ""
+            $report += "Last log lines:"
+            $report += '```text'
+            $report += Get-Content -LiteralPath "bijoy-final-build.log" -Tail 220
+            $report += '```'
+          }
+          $file = Join-Path $env:RUNNER_TEMP "bijoy-final-failure.md"
+          $report | Set-Content -LiteralPath $file -Encoding UTF8
+          gh issue create --title "Bijoy final Windows build failed (${{ github.run_number }})" --body-file $file
