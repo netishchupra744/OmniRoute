@@ -1,5 +1,5 @@
 export * from "./sidebarVisibility/types";
-export { COMPRESSION_CONTEXT_GROUP, SIDEBAR_SECTIONS } from "./sidebarVisibility/sections";
+export { SIDEBAR_SECTIONS } from "./sidebarVisibility/sections";
 
 import { HIDEABLE_SIDEBAR_ITEM_IDS } from "./sidebarVisibility/types";
 import type {
@@ -14,6 +14,10 @@ import type {
 
 export const SIDEBAR_ICON_ACCENTS: Partial<Record<SidebarItemId, string>> = {
   home: "#60A5FA",
+  "new-video": "#22C55E",
+  "my-projects": "#8B5CF6",
+  "avatar-profiles": "#EC4899",
+  usage: "#06B6D4",
   "api-manager": "#F59E0B",
   endpoints: "#38BDF8",
   providers: "#818CF8",
@@ -142,90 +146,19 @@ export const SIDEBAR_ITEM_ORDER_KEY = "sidebarItemOrder";
 export const SIDEBAR_PRESET_KEY = "sidebarActivePreset";
 export const SIDEBAR_SETTINGS_UPDATED_EVENT = "omniroute:settings-updated";
 
-const MINIMAL_SHOWN: ReadonlySet<HideableSidebarItemId> = new Set([
+const BIJOY_SHOWN: ReadonlySet<HideableSidebarItemId> = new Set([
   "home",
-  "endpoints",
-  "api-manager",
+  "new-video",
+  "my-projects",
+  "avatar-profiles",
   "providers",
-  "combos",
-  "analytics",
-  "costs",
-  "logs",
-  "health",
+  "usage",
   "settings-general",
-  "settings-sidebar",
-  "docs",
-  "changelog",
 ]);
 
-const DEVELOPER_SHOWN: ReadonlySet<HideableSidebarItemId> = new Set([
-  "home",
-  "endpoints",
-  "api-manager",
-  "providers",
-  "combos",
-  "quota",
-  "context-caveman",
-  "context-rtk",
-  "context-combos",
-  "cli-code",
-  "cli-agents",
-  "acp-agents",
-  "api-endpoints",
-  "analytics",
-  "analytics-combo-health",
-  "costs",
-  "cache",
-  "logs",
-  "health",
-  "runtime",
-  "translator",
-  "playground",
-  "memory",
-  "skills",
-  "mcp",
-  "a2a",
-  "settings-general",
-  "settings-routing",
-  "settings-resilience",
-  "settings-sidebar",
-  "docs",
-  "issues",
-  "changelog",
-]);
-
-const ADMIN_SHOWN: ReadonlySet<HideableSidebarItemId> = new Set([
-  "home",
-  "endpoints",
-  "api-manager",
-  "providers",
-  "combos",
-  "quota",
-  "analytics",
-  "analytics-combo-health",
-  "analytics-utilization",
-  "costs",
-  "costs-pricing",
-  "costs-budget",
-  "costs-quota-share",
-  "cache",
-  "logs",
-  "activity",
-  "health",
-  "runtime",
-  "audit",
-  "audit-mcp",
-  "audit-a2a",
-  "settings-general",
-  "settings-routing",
-  "settings-resilience",
-  "settings-security",
-  "settings-access-tokens",
-  "settings-feature-flags",
-  "settings-sidebar",
-  "docs",
-  "changelog",
-]);
+const MINIMAL_SHOWN = BIJOY_SHOWN;
+const DEVELOPER_SHOWN = BIJOY_SHOWN;
+const ADMIN_SHOWN = BIJOY_SHOWN;
 
 function buildHiddenList(shown: ReadonlySet<HideableSidebarItemId>): HideableSidebarItemId[] {
   return HIDEABLE_SIDEBAR_ITEM_IDS.filter((id) => !shown.has(id));

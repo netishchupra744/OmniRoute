@@ -808,3 +808,25 @@ export * from "./db/interceptionRules"; // Per-model web-search/web-fetch interc
 export * from "./db/relayProbeStats"; // Relay probe latency/health stats (#6909)
 export * from "./db/ccDiscoveryAliases"; // Claude Code discovery-alias gate (flag + per-provider/model overrides)
 export * from "./db/ccDiscoveryMetrics"; // Claude Code discovery-alias usage counters (alias requests + discovery hits)
+
+// ---------------------------------------------------------------------------
+// Bijoy AI Video Maker — project and avatar persistence
+// ---------------------------------------------------------------------------
+export * from "./db/videoProjects";
+export * from "./db/avatarProfiles";
+export * from "./db/videoProjectPlans";
+
+// Bijoy AI Video Maker persistent generation jobs
+export {
+  createSceneGenerationJobs,
+  listSceneGenerationJobs,
+  getSceneGenerationJob,
+  listResumableSceneGenerationJobs,
+  transitionSceneGenerationJob,
+  recordSceneGenerationFailure,
+  saveSceneOutput,
+  cancelSceneGenerationJob,
+} from "./db/sceneGenerationJobs";
+
+// Bijoy AI Video Maker cloud render jobs
+export * from "./db/renderJobs";

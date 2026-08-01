@@ -1,5 +1,5 @@
 /**
- * OmniRoute Electron Desktop App - Main Process
+ * Bijoy AI Video Maker - Electron Main Process
  *
  * This is the entry point for the Electron desktop application.
  * It manages the main window, system tray, server lifecycle, and IPC communication.
@@ -27,6 +27,7 @@ const {
   shell,
   session,
   Notification,
+  net,
 } = require("electron");
 const path = require("path");
 const { spawn } = require("child_process");
@@ -55,6 +56,9 @@ app.on("second-instance", () => {
 
 // ── Environment Detection ──────────────────────────────────
 const isDev = process.env.NODE_ENV === "development" || !app.isPackaged;
+const PRODUCT_NAME = "Bijoy AI Video Maker";
+const BACKGROUND_MODE_ENABLED = process.env.BIJOY_BACKGROUND_MODE === "true";
+const UPDATE_ENABLED = process.env.BIJOY_UPDATE_ENABLED === "true";
 
 // ── Paths ──────────────────────────────────────────────────
 const APP_PATH = app.getAppPath();
@@ -67,8 +71,61 @@ let tray = null;
 let nextServer = null;
 let serverPort = 20128;
 let isServerStopped = false;
+let videoMakerPumpTimer = null;
+let videoMakerPumpActive = false;
+let videoMakerPumpController = null;
+let videoMakerPumpSecret = process.env.BIJOY_INTERNAL_JOB_SECRET || null;
 
-const getServerUrl = () => `http://localhost:${serverPort}`;
+const getServerUrl = () => `http://127.0.0.1:${serverPort}`;
+
+async function pumpVideoMakerJobsOnce() {
+  if (videoMakerPumpActive || isServerStopped) return;
+  if (typeof net?.isOnline === "function" && !net.isOnline()) return;
+  videoMakerPumpActive = true;
+  const controller = new AbortController();
+  videoMakerPumpController = controller;
+  const timeout = setTimeout(() => controller.abort(), 20_000);
+  try {
+    const response = await fetch(`${getServerUrl()}/api/video-maker/jobs/pump`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(videoMakerPumpSecret
+          ? { "x-bijoy-job-secret": videoMakerPumpSecret }
+          : {}),
+      },
+      body: JSON.stringify({ online: true, limit: 33 }),
+      signal: controller.signal,
+    });
+    if (!response.ok && response.status !== 401 && response.status !== 403) {
+      console.warn(`[Electron] Video job resume pump returned HTTP ${response.status}`);
+    }
+  } catch (error) {
+    if (error?.name !== "AbortError") {
+      console.debug("[Electron] Video job resume pump paused:", error?.message || error);
+    }
+  } finally {
+    clearTimeout(timeout);
+    if (videoMakerPumpController === controller) videoMakerPumpController = null;
+    videoMakerPumpActive = false;
+  }
+}
+
+function startVideoMakerJobPump() {
+  if (videoMakerPumpTimer) return;
+  void pumpVideoMakerJobsOnce();
+  videoMakerPumpTimer = setInterval(() => {
+    void pumpVideoMakerJobsOnce();
+  }, 10_000);
+  videoMakerPumpTimer.unref?.();
+}
+
+function stopVideoMakerJobPump() {
+  if (videoMakerPumpTimer) clearInterval(videoMakerPumpTimer);
+  videoMakerPumpTimer = null;
+  videoMakerPumpController?.abort();
+  videoMakerPumpController = null;
+}
 
 function resolveNodeExecutable(env = process.env) {
   // #1081: Ensure Next.js standalone runs using Electron's Node runtime
@@ -134,13 +191,13 @@ function resolveDataDir(overridePath, env = process.env) {
 
   if (process.platform === "win32") {
     const appData = env.APPDATA || path.join(require("os").homedir(), "AppData", "Roaming");
-    return path.join(appData, "omniroute");
+    return path.join(appData, "Bijoy AI Video Maker");
   }
 
   const xdg = env.XDG_CONFIG_HOME?.trim();
-  if (xdg) return path.join(path.resolve(xdg), "omniroute");
+  if (xdg) return path.join(path.resolve(xdg), "bijoy-ai-video-maker");
 
-  return path.join(require("os").homedir(), ".omniroute");
+  return path.join(require("os").homedir(), ".bijoy-ai-video-maker");
 }
 
 function getPreferredEnvFilePath(env = process.env) {
@@ -240,7 +297,7 @@ function setupAutoUpdater() {
 
     if (Notification.isSupported()) {
       const notification = new Notification({
-        title: "OmniRoute Update Ready",
+        title: `${PRODUCT_NAME} Update Ready`,
         body: `Version ${info.version} is ready to install. Click to restart.`,
       });
       notification.on("click", () => {
@@ -257,6 +314,10 @@ function setupAutoUpdater() {
 }
 
 async function checkForUpdates(silent = false) {
+  if (!UPDATE_ENABLED) {
+    if (!silent) sendToRenderer("update-status", { status: "disabled" });
+    return;
+  }
   if (isDev) {
     console.log("[Electron] Dev mode — skipping auto-update");
     if (!silent) {
@@ -335,7 +396,7 @@ function setupContentSecurityPolicy() {
 }
 
 // ── Create Window ──────────────────────────────────────────
-function createWindow() {
+function createWindow({ startupError = false } = {}) {
   // Platform-conditional options (#9)
   const platformWindowOptions =
     process.platform === "darwin"
@@ -347,7 +408,7 @@ function createWindow() {
     height: 900,
     minWidth: 1024,
     minHeight: 700,
-    title: "OmniRoute",
+    title: PRODUCT_NAME,
     icon: path.join(RESOURCES_PATH, "assets", "icon.png"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -361,22 +422,30 @@ function createWindow() {
     ...platformWindowOptions,
   });
 
-  // Load the Next.js app
-  mainWindow.loadURL(getServerUrl());
+  // Load the application only after the embedded localhost service is ready.
+  if (startupError) {
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${PRODUCT_NAME}</title>
+      <style>body{margin:0;background:#08111f;color:#eef5ff;font:15px system-ui;display:grid;place-items:center;min-height:100vh}.card{width:min(620px,calc(100vw - 48px));background:#101d30;border:1px solid #263a55;border-radius:18px;padding:32px;box-shadow:0 24px 80px #0008}h1{margin:0 0 12px;font-size:25px}p{color:#adc0d9;line-height:1.6}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:24px}button{border:0;border-radius:9px;padding:11px 16px;font-weight:650;cursor:pointer;background:#2979ff;color:white}button.secondary{background:#22344e}.status{margin-top:16px;color:#ffcc80}</style></head>
+      <body><main class="card"><h1>Bijoy AI Video Maker could not start</h1><p>The embedded local service did not become ready. No terminal is required. Retry the service, open the application logs, or reset only the startup port and retry.</p><div class="actions"><button onclick="retry()">Retry</button><button class="secondary" onclick="window.electronAPI.openLogs()">Open logs</button><button class="secondary" onclick="reset()">Reset startup settings</button></div><div id="status" class="status"></div></main><script>async function retry(){const e=document.getElementById('status');e.textContent='Retrying local service…';const r=await window.electronAPI.retryStartup();e.textContent=r.success?'Service ready. Opening application…':(r.error||'Service is still unavailable.');}async function reset(){const e=document.getElementById('status');e.textContent='Resetting startup port…';const r=await window.electronAPI.resetStartupSettings();e.textContent=r.success?'Service ready. Opening application…':(r.error||'Reset did not resolve startup.');}</script></body></html>`;
+    mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+  } else {
+    mainWindow.loadURL(getServerUrl());
+  }
   if (isDev) {
     mainWindow.webContents.openDevTools({ mode: "detach" });
   }
 
-  // Show window when ready (unless starting minimized/hidden in tray)
+  // Background mode is opt-in. Normal launches always show one application window.
   mainWindow.once("ready-to-show", () => {
     const startHidden =
-      process.argv.includes("--hidden") ||
-      process.argv.includes("--minimized") ||
-      app.getLoginItemSettings().wasOpenedAsHidden;
-    if (!startHidden) {
-      mainWindow.show();
+      BACKGROUND_MODE_ENABLED &&
+      (process.argv.includes("--hidden") ||
+        process.argv.includes("--minimized") ||
+        app.getLoginItemSettings().wasOpenedAsHidden);
+    if (startHidden) {
+      console.log("[Electron] Optional background mode started hidden");
     } else {
-      console.log("[Electron] Launched hidden in background tray");
+      mainWindow.show();
     }
   });
 
@@ -395,13 +464,15 @@ function createWindow() {
     return { action: "deny" };
   });
 
-  // Handle window close — minimize to tray
+  // Closing exits completely by default. Tray/background behavior is explicit opt-in.
   mainWindow.on("close", (event) => {
-    if (!app.isQuitting) {
+    if (!app.isQuitting && BACKGROUND_MODE_ENABLED) {
       event.preventDefault();
       mainWindow.hide();
+      return false;
     }
-    return false;
+    app.isQuitting = true;
+    return true;
   });
 
   mainWindow.on("closed", () => {
@@ -434,7 +505,7 @@ function createTray() {
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: "Open OmniRoute",
+      label: `Open ${PRODUCT_NAME}`,
       click: () => {
         if (mainWindow) {
           mainWindow.show();
@@ -472,7 +543,7 @@ function createTray() {
     },
   ]);
 
-  tray.setToolTip("OmniRoute");
+  tray.setToolTip(PRODUCT_NAME);
   tray.setContextMenu(contextMenu);
 
   tray.on("double-click", () => {
@@ -500,12 +571,13 @@ async function changePort(newPort) {
   // Start server on new port
   startNextServer();
   await waitForServer(getServerUrl());
+  startVideoMakerJobPump();
 
   // Reload window and update tray
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.loadURL(getServerUrl());
   }
-  createTray();
+  if (BACKGROUND_MODE_ENABLED) createTray();
 
   sendToRenderer("port-changed", serverPort);
   sendToRenderer("server-status", { status: "running", port: serverPort });
@@ -589,12 +661,20 @@ function startNextServer() {
     changed = true;
     console.log("[Electron] ✨ API_KEY_SECRET auto-generated");
   }
+  if (!serverEnv.BIJOY_INTERNAL_JOB_SECRET) {
+    serverEnv.BIJOY_INTERNAL_JOB_SECRET = persisted.BIJOY_INTERNAL_JOB_SECRET = crypto
+      .randomBytes(32)
+      .toString("hex");
+    changed = true;
+    console.log("[Electron] ✨ Internal video job secret auto-generated");
+  }
+  videoMakerPumpSecret = serverEnv.BIJOY_INTERNAL_JOB_SECRET;
   if (changed) {
     serverEnv.OMNIROUTE_BOOTSTRAPPED = "true";
     try {
       fs.mkdirSync(dataDir, { recursive: true });
       const lines = [
-        "# Auto-generated by OmniRoute bootstrap",
+        "# Auto-generated by Bijoy AI Video Maker bootstrap",
         "",
         ...Object.entries(persisted).map(([k, v]) => `${k}=${v}`),
         "",
@@ -646,6 +726,7 @@ function startNextServer() {
       DATA_DIR: dataDir,
       PORT: String(serverPort),
       NODE_ENV: "production",
+      HOSTNAME: "127.0.0.1",
       ELECTRON_RUN_AS_NODE: "1",
       NODE_PATH: resolveServerNodePath(serverEnv),
       NODE_OPTIONS: serverNodeOptions,
@@ -669,9 +750,9 @@ function startNextServer() {
         process.env.OMNIROUTE_HEADLESS === "true";
       if (isHeadless && !global.loggedHeadlessReady) {
         global.loggedHeadlessReady = true;
-        console.log("\n\x1b[32m✔ OmniRoute Headless CLI Server is ready and listening!\x1b[0m");
-        console.log(`  \x1b[1mPort:\x1b[0m       http://localhost:${serverPort}`);
-        console.log(`  \x1b[1mAPI Base:\x1b[0m   http://localhost:${serverPort}/v1`);
+        console.log("\n\x1b[32m✔ Bijoy AI Video Maker Headless Server is ready and listening!\x1b[0m");
+        console.log(`  \x1b[1mPort:\x1b[0m       http://127.0.0.1:${serverPort}`);
+        console.log(`  \x1b[1mAPI Base:\x1b[0m   http://127.0.0.1:${serverPort}/v1`);
         console.log("  \x1b[2mPress Ctrl+C to terminate the process.\x1b[0m\n");
       }
     }
@@ -694,6 +775,7 @@ function startNextServer() {
 }
 
 function stopNextServer() {
+  stopVideoMakerJobPump();
   if (nextServer) {
     // #3347: kill the whole tree, not just the direct child. On Windows the server
     // (omniroute.exe-as-node) spawns grandchildren that a bare SIGTERM leaves alive,
@@ -717,15 +799,15 @@ function enableLinuxDesktopAutostart() {
       [
         "[Desktop Entry]",
         "Type=Application",
-        "Name=OmniRoute",
-        "Comment=OmniRoute Desktop Client",
+        `Name=${PRODUCT_NAME}`,
+        `Comment=${PRODUCT_NAME} Desktop Client`,
         `Exec="${execPath}" --hidden`,
         "Terminal=false",
         "Hidden=false",
         "X-GNOME-Autostart-enabled=true",
       ].join("\n") + "\n";
 
-    fs.writeFileSync(path.join(autostartDir, "omniroute-desktop.desktop"), desktopFileContent, {
+    fs.writeFileSync(path.join(autostartDir, "bijoy-ai-video-maker.desktop"), desktopFileContent, {
       mode: 0o644,
     });
     return true;
@@ -744,7 +826,7 @@ function disableLinuxDesktopAutostart() {
       os.homedir(),
       ".config",
       "autostart",
-      "omniroute-desktop.desktop"
+      "bijoy-ai-video-maker.desktop"
     );
     if (fs.existsSync(desktopPath)) {
       fs.unlinkSync(desktopPath);
@@ -762,7 +844,7 @@ function isLinuxDesktopAutostartEnabled() {
     const fs = require("fs");
     const path = require("path");
     return fs.existsSync(
-      path.join(os.homedir(), ".config", "autostart", "omniroute-desktop.desktop")
+      path.join(os.homedir(), ".config", "autostart", "bijoy-ai-video-maker.desktop")
     );
   } catch {
     return false;
@@ -799,7 +881,49 @@ function setupIpcHandlers() {
     await waitForServerExit(serverToStop);
     startNextServer();
     await waitForServer(getServerUrl());
+    startVideoMakerJobPump();
     return { success: true };
+  });
+
+  ipcMain.handle("retry-startup", async () => {
+    try {
+      const serverToStop = nextServer;
+      stopNextServer();
+      await waitForServerExit(serverToStop);
+      isServerStopped = false;
+      startNextServer();
+      const ready = await waitForServer(`${getServerUrl()}/api/monitoring/health`, 60000);
+      if (ready) startVideoMakerJobPump();
+      if (ready && mainWindow && !mainWindow.isDestroyed()) await mainWindow.loadURL(getServerUrl());
+      return ready ? { success: true } : { success: false, error: "Embedded local service is not ready. Open logs for details." };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : "Startup retry failed." };
+    }
+  });
+
+  ipcMain.handle("open-logs", async () => {
+    const logsPath = app.getPath("logs");
+    const error = await shell.openPath(logsPath);
+    return { success: !error, error: error || undefined, path: logsPath };
+  });
+
+  ipcMain.handle("reset-startup-settings", async () => {
+    serverPort = 20128;
+    return await (async () => {
+      try {
+        const serverToStop = nextServer;
+        stopNextServer();
+        await waitForServerExit(serverToStop);
+        isServerStopped = false;
+        startNextServer();
+        const ready = await waitForServer(`${getServerUrl()}/api/monitoring/health`, 60000);
+        if (ready) startVideoMakerJobPump();
+        if (ready && mainWindow && !mainWindow.isDestroyed()) await mainWindow.loadURL(getServerUrl());
+        return ready ? { success: true } : { success: false, error: "Startup port was reset, but the local service is still unavailable." };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : "Startup reset failed." };
+      }
+    })();
   });
 
   // Window controls
@@ -944,29 +1068,20 @@ app.whenReady().then(async () => {
     // Probe the auth-exempt health endpoint (not the root URL, which may redirect).
     serverReady = await waitForServer(`${getServerUrl()}/api/monitoring/health`);
   }
+  if (serverReady) startVideoMakerJobPump();
+
+  setupIpcHandlers();
+  if (UPDATE_ENABLED) setupAutoUpdater();
 
   if (isHeadless) {
     console.log("[Electron] Headless mode active — UI window and tray icon skipped");
   } else {
-    createWindow();
-    createTray();
+    createWindow({ startupError: !serverReady });
+    if (BACKGROUND_MODE_ENABLED) createTray();
   }
 
-  setupIpcHandlers();
-  setupAutoUpdater();
-
-  // If readiness timed out (e.g. very long first-launch migrations), don't leave the
-  // window stuck on a hanging connection — keep polling and reload once it responds (#2460).
-  if (!isDev && !serverReady && !isHeadless) {
-    void waitForServer(`${getServerUrl()}/api/monitoring/health`, 300000).then((ready) => {
-      if (ready && mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.loadURL(getServerUrl());
-      }
-    });
-  }
-
-  // Check for updates after a short delay (don't block startup)
-  if (!isDev) {
+  // Bijoy update metadata is intentionally disabled until an owned release channel is configured.
+  if (!isDev && UPDATE_ENABLED) {
     setTimeout(() => {
       checkForUpdates(true);
     }, 3000);
@@ -996,6 +1111,7 @@ app.on("window-all-closed", () => {
 
 // Clean up before quit
 app.on("before-quit", async (event) => {
+  stopVideoMakerJobPump();
   if (nextServer && !isServerStopped) {
     event.preventDefault(); // Stop immediate quit
     app.isQuitting = true;
