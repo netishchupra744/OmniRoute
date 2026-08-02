@@ -15,9 +15,9 @@ permissions:
   contents: read
 
 jobs:
-  package-dotnet-sdk:
+  package-offline-toolchain:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Install isolated .NET SDK
         shell: bash
@@ -37,11 +37,75 @@ jobs:
           "$install_dir/dotnet" --info
           printf '8.0.423\n' > "$install_dir/BIJOY_TOOLCHAIN_VERSION.txt"
 
+      - name: Restore exact Bijoy DevHost dependency cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DOTNET_ROOT="$RUNNER_TEMP/dotnet-8.0.423"
+          export PATH="$DOTNET_ROOT:$PATH"
+          export DOTNET_CLI_TELEMETRY_OPTOUT=1
+          work="$RUNNER_TEMP/bijoy-offline-restore"
+          mkdir -p "$work"
+
+          cat > "$work/Desktop.csproj" <<'EOF'
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+              <EnableWindowsTargeting>true</EnableWindowsTargeting>
+              <UseWPF>true</UseWPF>
+              <UseWindowsForms>true</UseWindowsForms>
+              <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+            </PropertyGroup>
+            <ItemGroup>
+              <FrameworkReference Include="Microsoft.AspNetCore.App" />
+              <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+              <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="8.0.1" />
+              <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4078.44" />
+              <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+              <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.29" />
+              <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.29" />
+              <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />
+              <PackageReference Include="Serilog.AspNetCore" Version="8.0.3" />
+              <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+            </ItemGroup>
+          </Project>
+          EOF
+
+          cat > "$work/Tests.csproj" <<'EOF'
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+              <EnableWindowsTargeting>true</EnableWindowsTargeting>
+              <IsTestProject>true</IsTestProject>
+            </PropertyGroup>
+            <ItemGroup>
+              <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+              <PackageReference Include="xunit" Version="2.9.3" />
+              <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+              <PackageReference Include="coverlet.collector" Version="6.0.4" />
+            </ItemGroup>
+          </Project>
+          EOF
+
+          dotnet restore "$work/Desktop.csproj" --runtime win-x64
+          dotnet restore "$work/Tests.csproj"
+          du -sh "$HOME/.nuget/packages"
+          printf 'Bijoy DevHost exact dependencies restored on %s\n' "$(date -u +%FT%TZ)" > "$HOME/.nuget/packages/BIJOY_CACHE_MANIFEST.txt"
+
       - name: Upload compressed isolated SDK
         uses: actions/upload-artifact@v4
         with:
           name: bijoy-dotnet-sdk-8.0.423-linux-x64-compressed
           path: ${{ runner.temp }}/dotnet-8.0.423
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 9
+
+      - name: Upload compressed offline NuGet cache
+        uses: actions/upload-artifact@v4
+        with:
+          name: bijoy-nuget-cache-win-x64
+          path: ~/.nuget/packages
           if-no-files-found: error
           retention-days: 1
           compression-level: 9
