@@ -1,0 +1,70 @@
+name: Bijoy DevHost Official SQLite Windows Runtime
+
+on:
+  push:
+    branches:
+      - tooling/bijoy-devhost-sdk
+  pull_request:
+    branches:
+      - release/v3.8.50
+    paths:
+      - .github/workflows/bijoy-devhost-toolchain.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-sqlite-runtime:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download pinned official SQLite x64 DLL
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = Join-Path $env:RUNNER_TEMP 'sqlite-dll-win-x64-3530400.zip'
+          $extract = Join-Path $env:RUNNER_TEMP 'sqlite-official'
+          Invoke-WebRequest -Uri 'https://www.sqlite.org/2026/sqlite-dll-win-x64-3530400.zip' -OutFile $archive -UseBasicParsing
+          $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
+          $expected = '8b959b7eff4a81f6a62fc3468f9273e5cfe78d4a927e62215aed231b654fb104'
+          if ($actual -ne $expected) { throw "SQLite archive hash mismatch: $actual" }
+          Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
+          Copy-Item -LiteralPath (Join-Path $extract 'sqlite3.dll') -Destination (Join-Path $env:RUNNER_TEMP 'e_sqlite3.dll') -Force
+
+      - name: Load DLL and execute SQLite API
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class BijoySQLiteSmoke {
+              [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+              public delegate IntPtr VersionDelegate();
+          }
+          '@
+          $dll = Join-Path $env:RUNNER_TEMP 'e_sqlite3.dll'
+          $handle = [System.Runtime.InteropServices.NativeLibrary]::Load($dll)
+          if ($handle -eq [IntPtr]::Zero) { throw 'NativeLibrary.Load returned a null handle.' }
+          try {
+            $symbol = [System.Runtime.InteropServices.NativeLibrary]::GetExport($handle, 'sqlite3_libversion')
+            if ($symbol -eq [IntPtr]::Zero) { throw 'sqlite3_libversion export was not found.' }
+            $delegate = [System.Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer($symbol, [BijoySQLiteSmoke+VersionDelegate])
+            $versionPointer = $delegate.Invoke()
+            $version = [System.Runtime.InteropServices.Marshal]::PtrToStringAnsi($versionPointer)
+            if ($version -ne '3.53.4') { throw "Unexpected SQLite version: $version" }
+            Write-Host "SQLite native load and API call passed: $version"
+          }
+          finally {
+            [System.Runtime.InteropServices.NativeLibrary]::Free($handle)
+          }
+
+      - name: Upload validated DLL
+        uses: actions/upload-artifact@v4
+        with:
+          name: bijoy-official-sqlite-3.53.4-win-x64
+          path: ${{ runner.temp }}/e_sqlite3.dll
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
