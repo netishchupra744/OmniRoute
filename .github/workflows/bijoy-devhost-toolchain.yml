@@ -1,0 +1,42 @@
+name: Bijoy DevHost Toolchain Bootstrap
+
+on:
+  push:
+    branches:
+      - tooling/bijoy-devhost-sdk
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-dotnet-sdk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Install isolated .NET SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_dir="$RUNNER_TEMP/dotnet-8.0.423"
+          mkdir -p "$install_dir"
+          curl --fail --silent --show-error --location \
+            https://dot.net/v1/dotnet-install.sh \
+            --output "$RUNNER_TEMP/dotnet-install.sh"
+          bash "$RUNNER_TEMP/dotnet-install.sh" \
+            --version 8.0.423 \
+            --architecture x64 \
+            --os linux \
+            --install-dir "$install_dir" \
+            --no-path
+          "$install_dir/dotnet" --info
+          printf '8.0.423\n' > "$install_dir/BIJOY_TOOLCHAIN_VERSION.txt"
+
+      - name: Upload isolated SDK
+        uses: actions/upload-artifact@v4
+        with:
+          name: bijoy-dotnet-sdk-8.0.423-linux-x64
+          path: ${{ runner.temp }}/dotnet-8.0.423
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
