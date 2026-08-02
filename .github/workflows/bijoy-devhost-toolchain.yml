@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - tooling/bijoy-devhost-sdk
+  pull_request:
+    branches:
+      - release/v3.8.50
+    paths:
+      - .github/workflows/bijoy-devhost-toolchain.yml
   workflow_dispatch:
 
 permissions:
