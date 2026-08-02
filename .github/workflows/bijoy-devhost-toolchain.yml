@@ -36,14 +36,22 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class BijoySQLiteSmoke {
+              [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+              public delegate IntPtr VersionDelegate();
+          }
+          '@
           $dll = Join-Path $env:RUNNER_TEMP 'e_sqlite3.dll'
           $handle = [System.Runtime.InteropServices.NativeLibrary]::Load($dll)
           if ($handle -eq [IntPtr]::Zero) { throw 'NativeLibrary.Load returned a null handle.' }
           try {
             $symbol = [System.Runtime.InteropServices.NativeLibrary]::GetExport($handle, 'sqlite3_libversion')
             if ($symbol -eq [IntPtr]::Zero) { throw 'sqlite3_libversion export was not found.' }
-            $delegateType = [System.Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer($symbol, [Func[IntPtr]])
-            $versionPointer = $delegateType.Invoke()
+            $delegate = [System.Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer($symbol, [BijoySQLiteSmoke+VersionDelegate])
+            $versionPointer = $delegate.Invoke()
             $version = [System.Runtime.InteropServices.Marshal]::PtrToStringAnsi($versionPointer)
             if ($version -ne '3.53.4') { throw "Unexpected SQLite version: $version" }
             Write-Host "SQLite native load and API call passed: $version"
