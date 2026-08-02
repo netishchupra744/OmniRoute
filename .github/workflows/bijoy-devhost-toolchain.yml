@@ -37,11 +37,11 @@ jobs:
           "$install_dir/dotnet" --info
           printf '8.0.423\n' > "$install_dir/BIJOY_TOOLCHAIN_VERSION.txt"
 
-      - name: Upload isolated SDK
+      - name: Upload compressed isolated SDK
         uses: actions/upload-artifact@v4
         with:
-          name: bijoy-dotnet-sdk-8.0.423-linux-x64
+          name: bijoy-dotnet-sdk-8.0.423-linux-x64-compressed
           path: ${{ runner.temp }}/dotnet-8.0.423
           if-no-files-found: error
           retention-days: 1
-          compression-level: 0
+          compression-level: 9
